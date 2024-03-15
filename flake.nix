@@ -19,10 +19,10 @@
           in {
             canteen = pkgs.stdenv.mkDerivation {
               name = "canteen";
-              src = ./src;
+              src = ./.;
               installPhase = ''
                 mkdir -p $out/bin
-                ${poly} -o $out/bin/canteen main.sml
+                ${poly} -o $out/bin/canteen build.sml
             '';};
 
           });
@@ -37,7 +37,7 @@
               type = "app";
               program = toString (pkgs.writeShellScript "build-program" ''
               output=$(${mktemp})
-              ${poly} -o $output/bin/canteen src/main.sml && echo "Successfully built!"
+              ${poly} -o $output build.sml && echo "Successfully built!"
             '');
             };
           });
@@ -52,6 +52,8 @@
                 modules = [
                   ({ pkgs, ... }: {
                     packages = [
+                      pkgs.gcc
+                      pkgs.glibc
                       pkgs.just
                       pkgs.polyml
                       pkgs.mlton # required by smlfmt
