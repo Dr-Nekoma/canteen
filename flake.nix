@@ -40,6 +40,13 @@
               ${poly} -o $output build.sml && echo "Successfully built!"
             '');
             };
+            execute = {
+              type = "app";
+              program = toString (pkgs.writeShellScript "build-program" ''
+              output=$(${mktemp})
+              ${poly} -o $output build.sml && $output
+            '');
+            };
           });
 
         devShells = forAllSystems (system:
