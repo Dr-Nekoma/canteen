@@ -13,13 +13,21 @@ BEGIN Person Account
 END
 *)
 
+		       
+
 structure Data = struct
+    fun seek stream position =
+        let val something = BinIO.StreamIO.getReader(BinIO.getInstream stream)
+        in case something
+	     of reader as (BinPrimIO.RD{setPos = SOME setPos, ...}, _) => 
+	       (setPos position;
+		BinIO.setInstream(stream, BinIO.StreamIO.mkInstream(reader)))
+             | _ => raise Fail "Error in seek"
+        end
     fun get entity initialOffset size =
         let val inStream = BinIO.openIn entity
-            val (BinPrimIO.RD{setPos = SOME setPos, ...}, _) = 
-                 BinIO.StreamIO.getReader(BinIO.getInstream inStream)
-        in (setPos (Position.fromInt initialOffset);
-            BinIO.input1 (inStream))
+        in (seek inStream initialOffset;
+            BinIO.inputN (inStream, 6))
         end
     fun set entity position payload =
         let val outStream = BinIO.openOut entity

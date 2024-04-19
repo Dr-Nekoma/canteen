@@ -1,8 +1,8 @@
 build:
-	nix build .#canteen
+	nix build .#canteen -L
 
 run:
-	nix run .#canteen
+	nix run .#execute
 
 format:
 	smlfmt --force $(find ./ -type f \( -iname \*.sml \))
