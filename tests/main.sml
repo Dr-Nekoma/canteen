@@ -14,10 +14,13 @@ infix 3 ||>
   fun (x, y) ||> f = f x y (* Left application  *)
 
 fun readData () =
-    Data.get "./abc" 0 1
-    |> 
+    Data.get "./abc" 0 10
+    |> Byte.bytesToString
 
-fun main () =
-    (* writeData () *)
+fun writeData () =
+    Data.set "./abc" 0 (Word8Vector.tabulate (10, Word8.fromInt))
+
+fun main () = (
+    writeData ();
     print (PolyML.makestring (readData ()) ^ "\n")
-
+)
