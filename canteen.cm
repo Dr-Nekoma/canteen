@@ -1,6 +1,4 @@
 Group is
-	tests/main.sml
-	src/writer.sml
-    src/reader.sml
-    src/broker.sml
-	build.sml
+    tests/merkle.sml
+    src/merkle.sml
+    build.sml

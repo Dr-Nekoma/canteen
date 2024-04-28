@@ -60,11 +60,13 @@
                   ({ pkgs, ... }: {
                     packages = [
                       pkgs.gcc
-                      pkgs.glibc
-                      pkgs.just
+                      # pkgs.glibc
+                      # pkgs.just
                       pkgs.polyml
-                      pkgs.mlton # required by smlfmt
-                      pkgs.smlfmt];
+                      pkgs.millet
+                      # pkgs.mlton # required by smlfmt
+                      # pkgs.smlfmt
+                    ];
                   })
                 ];
               };
