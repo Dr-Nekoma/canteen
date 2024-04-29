@@ -1,7 +1,5 @@
-structure Tree = MerkleTree (struct type t = int fun equal (a: int, b: int) = a = b end)
+structure Tree = MerkleTree (struct type t = int fun hashContent (x: t) = PolyML.makestring x fun hashHash (left: string, right: string) = left ^ right end)
 fun main () =
-    let 
-        val tree = Tree.Node {key = 1, children = ref (Array.fromList [Tree.Node {key = 2, children = ref (Array.fromList []), data = 2}, 
-                                                                                    Tree.Node {key = 3, children = ref (Array.fromList []), data = 3}]), data = 1}
-    in (print ((PolyML.makestring (Tree.search 3 tree)) ^ "\n"))
+    let val tree = Tree.buildTree [1, 2, 3, 4, 5]
+    in (print ((PolyML.makestring tree) ^ "\n"))
     end

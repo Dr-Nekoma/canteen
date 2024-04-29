@@ -64,8 +64,8 @@
                       # pkgs.just
                       pkgs.polyml
                       pkgs.millet
-                      # pkgs.mlton # required by smlfmt
-                      # pkgs.smlfmt
+                      pkgs.mlton # required by smlfmt
+                      pkgs.smlfmt
                     ];
                   })
                 ];
