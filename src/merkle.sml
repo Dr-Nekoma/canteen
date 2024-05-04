@@ -1,3 +1,6 @@
+(* TODO: Make tree non binary *)
+(* TODO: Use drop instead of take and reverse *)
+(* TODO: Handle hashes without duplications to avoid [1,2,3,4,5] == [1,2,3,3,4,5,5,5] *)
 functor MerkleTree (Data : sig type content
                                type hash
                                val hashContent : content -> hash
@@ -11,7 +14,7 @@ struct
       | buildTree (x::[]) = Leaf { hash = Data.hashContent x, content = x }
       | buildTree (leavesData: Data.content list) =
         let val (left, right) = 
-                if List.length leavesData mod 2 = 0 
+                if List.length leavesData mod 2 = 0
                 then (buildTree(List.take(leavesData, Int.div(List.length leavesData, 2))), 
                       buildTree(List.take(List.rev leavesData, Int.div(List.length leavesData, 2))))
                 else (buildTree(List.take(leavesData, Int.div(List.length leavesData, 2))), 
