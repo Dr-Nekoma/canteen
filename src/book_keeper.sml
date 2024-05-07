@@ -1,15 +1,32 @@
-structure Can :> sig
-  val handleClient: Payload -> unit
-  val handleServer: Payload -> unit
-  val start: unit -> unit
-  val close: unit -> unit
-end = struct
+structure Payload = struct
+    type 'hash Descriptor =
+        { hashes: 'hash list, fileName: string }
+    fun 'hash create_descriptor hashList fileName : 'hash Descriptor =
+        { hashes = hashList, fileName = fileName }
+end 
+
+functor FileSystem (Hash: sig type hash end ) = struct
+    fun fopen (fileName: string) = 
+        Payload.create_descriptor [] fileName
+    fun fread (fileName: string) (quantity: int) (offset: Hash.hash option) = 
+        raise Fail ":("
 end
 
-(* 
-structure Payload = struct
-end 
-*)
+structure Hashable = struct 
+    type hash = Word.word
+    type content = int
+    fun hashContent (x: content): hash = Word.fromInt x
+    fun hashHash (left: hash, right: hash): hash = Word.+ (left, right)
+end
+
+functor BookKeeper (Hashable : sig type content
+                                  type hash
+                                  val hashContent : content -> hash
+                                  val hashHash: hash * hash -> hash end) = struct
+    val files: Hashable.hash HashArray.hash = HashArray.hash 10
+    val hashes: string list HashArray.hash = HashArray.hash 10
+    structure Tree = MerkleTree (Hashable)
+end
 
 structure Data :> sig
   val get: string -> Position.int -> int -> Word8Vector.vector

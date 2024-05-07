@@ -1,8 +1,8 @@
 app use [
     "src/merkle.sml",
-    (*"src/writer.sml",
-    "src/reader.sml",
-    "src/broker.sml",
-    "tests/main.sml"*)
+    (* "src/writer.sml", *)
+    (* "src/reader.sml", *)
+    "src/book_keeper.sml",
+    (* "tests/main.sml", *)
     "tests/merkle.sml"
 ]
