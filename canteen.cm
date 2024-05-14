@@ -1,5 +1,6 @@
 Group is
     tests/merkle.sml
     src/merkle.sml
+    src/communication.sml
     src/book_keeper.sml
     build.sml
