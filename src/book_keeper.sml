@@ -1,10 +1,22 @@
 structure Payload = struct
+    open Utilities
     type 'hash Descriptor =
         { hashes: 'hash list, fileName: string }
     fun 'hash create_descriptor hashList fileName : 'hash Descriptor =
         { hashes = hashList, fileName = fileName }
+    datatype Action = OPEN of {filename: string}
+		    | READ of {filename: string, quantity: int, offset: string option}
+		    | WRITE of {filename: string, content: Word8.word list}
+    (* TODO: Upgrade to a decent parsing strategy: s-exprs, scheme *)				   
+    fun	deserialize (content: string): Action =
+	let val tag = String.sub (content, 0)
+	in case tag
+	    of #"O" => OPEN {filename = (String.implode (List.tl (String.explode content)))}
+	    | _ => raise Fail "Only OPEN is implemented xD"
+	end
 end 
 
+(* Glusterfsd *)
 functor FileSystem (Hash: sig type hash end ) = struct
     fun fopen (fileName: string) = 
         Payload.create_descriptor [] fileName
@@ -19,16 +31,18 @@ structure Hashable = struct
     fun hashHash (left: hash, right: hash): hash = Word.+ (left, right)
 end
 
+(* Glusterd *)
 functor BookKeeper (Hashable : sig type content
                                   type hash
                                   val hashContent : content -> hash
                                   val hashHash: hash * hash -> hash end) = struct
-    val files: Hashable.hash HashArray.hash = HashArray.hash 10
-    val hashes: string list HashArray.hash = HashArray.hash 10
+    val files: Hashable.hash HashArray.hash = HashArray.hash 10 (* File -> Hash *)
+    val hashes: string list HashArray.hash = HashArray.hash 10 (* Hash -> Locations *)
     structure Tree = MerkleTree (Hashable)
 end
 
-structure Data :> sig
+(* XFS *)
+structure Data :> sig 
   val get: string -> Position.int -> int -> Word8Vector.vector
   val set: string -> Position.int -> Word8Vector.vector -> unit
 end = struct

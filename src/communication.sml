@@ -1,17 +1,32 @@
 structure Communication = struct
     fun send message sock = 
         let val serializedMessage = Word8VectorSlice.full (Byte.stringToBytes message)
-        in print "Sending..."; Socket.sendVec (sock, serializedMessage); Socket.close sock
+        in print "Sending...\n"; Socket.sendVec (sock, serializedMessage)
         end
 
-    fun receive sock = 
-        let val message = Socket.recvVec (sock, 6)
-        in print "Receiving..."; print (Byte.bytesToString message)
+    fun receive amount sock = 
+        let val message = Socket.recvVec (sock, amount)
+        in print "Receiving...\n"; print (Byte.bytesToString message)
         end
 
-    fun accept (handler: Socket.active INetSock.stream_sock -> unit) (serv: Socket.passive INetSock.stream_sock) =
+    datatype HandleAction = Stop | Continue
+	    
+    fun receiveUntil (delimiter: Char.char) buffer (sock: Socket.active INetSock.stream_sock) =
+	let val delimiter = str delimiter
+	    fun loop acc = 
+		let val message = (Byte.bytesToString (Socket.recvVec (sock, 1)))
+		in if delimiter = message
+		   then acc
+		   else loop (acc ^ message)
+		end
+	in buffer := loop ""; Socket.close sock; Stop
+	end
+	    
+    fun accept (handler: Socket.active INetSock.stream_sock -> HandleAction) (serv: Socket.passive INetSock.stream_sock) =
         let val (s, _) = Socket.accept serv
-        in handler s; accept handler serv
+        in case handler s
+	    of Stop => ()
+	    | Continue => accept handler serv
         end
 
     fun spawn handler port queueSize =
