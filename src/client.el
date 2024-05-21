@@ -18,5 +18,5 @@
     (set-process-filter connection 'perplex-handler)
     (process-send-string connection content)))
 
-(perplex-client "OCars\r")
+(perplex-client (concat "WAbc" (char-to-string #x2) "trashy" (char-to-string ?\C-d)))
 (print *mailbox*)
