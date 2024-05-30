@@ -62,12 +62,16 @@ end = struct
     fun get entity initialOffset size =
         let val inStream = BinIO.openIn entity
         in (seek (In inStream) initialOffset;
-            BinIO.inputN (inStream, size))
+            let val value = BinIO.inputN (inStream, size)
+	    in (BinIO.closeIn inStream; value)
+	    end)
         end
-    fun set entity position toWrite =
+    fun set entity position toWrite: unit =
         let val outStream = BinIO.openOut entity
         in (seek (Out outStream) position;
-            BinIO.output (outStream, toWrite))
+            BinIO.output (outStream, toWrite);
+	    BinIO.flushOut outStream;
+	    BinIO.closeOut outStream)
         end
 end
     
@@ -77,23 +81,28 @@ functor FileSystem (Hash: sig type hash end) = struct
         Payload.create_descriptor [] fileName
     fun fread (fileName: string) (quantity: int) (offset: Hash.hash option) = 
         raise Fail ":("
-    fun fwrite (filename: string, content: Word8Vector.vector) =
+    fun fwrite (filename: string, content: Word8Vector.vector) = (
+	print filename;
+	print (PolyML.makestring content);
         Data.set filename 0 content
+    )
 end
 
 structure Hashable = struct 
-    type hash = Word.word
+    type hash = Word8.word
     type content = int
     val chunkSize = 10
-    fun hashContent (x: content): hash = Word.fromInt x
-    fun hashHash (left: hash, right: hash): hash = Word.+ (left, right)
+    fun hashEncoder (a: hash) = (Word8Vector.fromList [a], 4) 
+    fun hashContent (x: content): hash = Word8.fromInt x
+    fun hashHash (left: hash, right: hash): hash = Word8.+ (left, right)
 end
 
 (* Glusterd *)
 functor BookKeeper (Hashable : sig type content
                                    type hash
                                    val chunkSize: int
-                                   val hashContent : content -> hash
+				   val hashEncoder : hash -> Word8Vector.vector * int
+                                   val hashContent : content -> hash								    
                                    val hashHash: hash * hash -> hash end) = struct
     type Location = {node: string, path: string, position: int, size: int}
     
@@ -107,6 +116,38 @@ functor BookKeeper (Hashable : sig type content
 
     structure FileSystem = FileSystem(Hashable)
 
+    fun filesTableEncoder (table: Hashable.hash HashArray.hash) : Word8Vector.vector =
+	let fun foldAux (key, value, acc) =
+		let val stringLength = String.size key
+		    val encodedKey = [Word8Vector.fromList [Word8.fromInt stringLength]] @ [Byte.stringToBytes key]
+		    val (encodedValue, encodedSize) = Hashable.hashEncoder value
+                    val encodedFullValue = [Word8Vector.fromList [Word8.fromInt encodedSize]] @ [encodedValue]
+		in encodedKey @ encodedFullValue @ acc
+		end
+	in Word8Vector.concat (HashArray.fold foldAux nil table)
+	end
+
+    fun locationsTableEncoder (table: Location list HashArray.hash) : Word8Vector.vector =
+	let fun foldAux (key, value, acc) =
+		let val stringLength = String.size key
+		    val encodedKey = [Word8Vector.fromList [Word8.fromInt stringLength]] @ [Byte.stringToBytes key]
+		    val (encodedValue, encodedSize) = Hashable.hashEncoder value
+                    val encodedFullValue = [Word8Vector.fromList [Word8.fromInt encodedSize]] @ [encodedValue]
+		in encodedKey @ encodedFullValue @ acc
+		end
+	in Word8Vector.concat (HashArray.fold foldAux nil table)
+	end
+	    
+    fun serialize filepath data encoder : unit =
+	let val serializedData = encoder data
+        in Data.set filepath 0 serializedData				     
+        end
+
+    fun deserialize filepath decoder =
+	let val data = Data.get filepath 0 (Position.toInt (OS.FileSys.fileSize filepath))
+	in decoder data
+	end
+
     fun assureDirectory () = (
         if OS.FileSys.isDir "/tmp/canteen"
         then ()
@@ -116,13 +157,18 @@ functor BookKeeper (Hashable : sig type content
         
     fun run () = (
         assureDirectory();
-        let val buffer: string ref = ref ""
-            val EOT = Char.chr 4
-            (* handle Fail ex => (print (PolyML.makestring ex); loop ()) *)
-            fun spawner (): unit = Communication.spawn (Communication.receiveUntil EOT buffer) 7778 5
-            val thread = Thread.Thread.fork (spawner, [])
-            fun loop () = ()
-        in if Thread.Thread.isActive thread then loop () else ()
+        let val EOT = Char.chr 4
+	    fun action (buffer: string): unit = 
+		let val command = Payload.deserialize buffer
+		in case command
+		    of Payload.OPEN _ => raise Fail "Bomb"
+		     | Payload.READ _ => raise Fail "Bomb"
+		     | Payload.WRITE {filename = filename, content = content} =>
+		       (* TODO: Add here a check for the chunkSize and the merkle tree structure *)
+		       FileSystem.fwrite("/tmp/canteen/" ^ filename, content)
+		end
+            fun handler socket: unit = action(Communication.receiveUntil EOT socket)  			       
+        in Communication.spawn handler 7778 5
         end
     )
     

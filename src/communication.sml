@@ -8,22 +8,8 @@ structure Communication = struct
         let val message = Socket.recvVec (sock, amount)
         in print "Receiving...\n"; print (Byte.bytesToString message)
         end
-
-    datatype HandleAction = Stop | Continue
-
-    fun bleh () = (*
-        let val command = Payload.deserialize (!buffer)
-               in case command
-                  of Payload.OPEN _ => raise Fail "Bomb"
-                  | Payload.READ _ => raise Fail "Bomb"
-                  | Payload.WRITE {filename = filename, content = content} =>
-                      (* TODO: Add here a check for the chunkSize and the merkle tree structure *)
-                      FileSystem.fwrite("/tmp/canteen/" ^ filename, content)
-               end
-    *)
-        print "Hello!"
-
-    fun receiveUntil (delimiter: Char.char) buffer (sock: Socket.active INetSock.stream_sock) =
+	      
+    fun receiveUntil (delimiter: Char.char) (sock: Socket.active INetSock.stream_sock): string =
 	let val delimiter = str delimiter
 	    fun loop acc = 
 		let val message = (Byte.bytesToString (Socket.recvVec (sock, 1)))
@@ -31,15 +17,15 @@ structure Communication = struct
 		   then acc
 		   else loop (acc ^ message)
 		end
-	in buffer := loop ""; Socket.close sock; Continue
+	in loop ""
 	end
 	    
-    fun accept (handler: Socket.active INetSock.stream_sock -> HandleAction) (serv: Socket.passive INetSock.stream_sock) = (
+    fun accept (handler: Socket.active INetSock.stream_sock -> unit) (serv: Socket.passive INetSock.stream_sock) = (
         print "Accepting";
         let val (s, _) = Socket.accept serv
-        in case handler s
-	    of Stop => ()
-	    | Continue => (bleh ();accept handler serv)
+            fun closure (): unit = (handler s; Socket.close s)
+            val thread = Thread.Thread.fork (closure, [])	       
+	in accept handler serv
         end
     )
         
