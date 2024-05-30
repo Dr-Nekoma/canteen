@@ -23,13 +23,15 @@ structure Payload = struct
             OPEN {filename = (String.implode (List.tl (String.explode content)))}
     end
     
-    fun	deserialize (content: string): Action =
+    fun deserialize (content: string): Action = (
+        if content = "" then raise Fail "Nothing to be deserialized" else ();
 	    let val tag = String.sub (content, 0)
 	    in case tag
 	        of #"O" => OPEN.deserialize content
 	        |  #"W" => WRITE.deserialize content
 	        | _ => raise Fail "Only OPEN is implemented xD"
 	    end
+    )
 end
 
 
@@ -105,19 +107,23 @@ functor BookKeeper (Hashable : sig type content
 
     structure FileSystem = FileSystem(Hashable)
 
-    fun run () =
+    fun assureDirectory () = (
+        if OS.FileSys.isDir "/tmp/canteen"
+        then ()
+        else OS.FileSys.mkDir "/tmp/canteen"
+    )
+    handle OS.SysErr _ => OS.FileSys.mkDir "/tmp/canteen"
+        
+    fun run () = (
+        assureDirectory();
         let val buffer: string ref = ref ""
             val EOT = Char.chr 4
-            val _ = Communication.spawn (Communication.receiveUntil EOT buffer) 7778 5
-            val command = Payload.deserialize (!buffer)
-        in case command
-           of Payload.OPEN _ => raise Fail "Bomb"
-           | Payload.READ _ => raise Fail "Bomb"
-           | Payload.WRITE {filename = filename, content = content} =>
-               (* TODO: Add here a check for the chunkSize and the merkle tree structure *)
-               FileSystem.fwrite(filename, content)
-               
-           
+            (* handle Fail ex => (print (PolyML.makestring ex); loop ()) *)
+            fun spawner (): unit = Communication.spawn (Communication.receiveUntil EOT buffer) 7778 5
+            val thread = Thread.Thread.fork (spawner, [])
+            fun loop () = ()
+        in if Thread.Thread.isActive thread then loop () else ()
         end
+    )
     
 end
