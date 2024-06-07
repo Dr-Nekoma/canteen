@@ -14,6 +14,7 @@ struct
                       | ((x, NONE), acc) => x::acc) [] pairs)
       end
     fun buildTree [elem] = elem
+      | buildTree [] = raise Fail "Can't build tree with empty list"
       | buildTree leavesData = 
           let val current = generateHashedElements leavesData
           in buildTree current

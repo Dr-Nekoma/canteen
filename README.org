@@ -1,3 +1,13 @@
 * Canteen
 
 Let us create a collection of shiny and security-driven algorithms and functions.
+
+* TODOs
+
+- [] Finish documentation of writing and reading
+- [] Finish serialization of hash tables and merkle trees
+- [] Implement append-only files
+- [] Write and read pieces of data in buffers
+- [] Implement hash storage system for RacketowerDB
+- [] Implement chunkable story (a.k.a, make a miracle)
+
