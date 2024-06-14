@@ -24,4 +24,10 @@ structure Utilities = struct
             in loop initialString "" end
     end
 
+    fun assureDirectory () = (
+        if OS.FileSys.isDir "/tmp/canteen"
+        then ()
+        else OS.FileSys.mkDir "/tmp/canteen"
+    )
+    handle OS.SysErr _ => OS.FileSys.mkDir "/tmp/canteen"
 end
