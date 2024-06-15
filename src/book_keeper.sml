@@ -35,21 +35,6 @@ structure Payload = struct
     )
 end
 
-
-
-structure Hashable = struct 
-    type hash = Word8Vector.vector
-    type content = string
-    val toContent = Byte.bytesToString
-    val chunkSize = 10
-    (* fun hashEncoder (a: hash) = (Word8Vector.fromList [a], 4)  *)
-    val hashContent = Byte.stringToBytes
-    val hashHash = Word8Vector.concat
-    val serialize = Byte.stringToBytes
-    fun equal (x: Word8Vector.vector, y: Word8Vector.vector) =
-        Byte.bytesToString x = Byte.bytesToString y
-end
-
 (* XFS *)
 structure Data :> sig 
   val get: string -> Position.int -> int -> Word8Vector.vector
@@ -94,19 +79,22 @@ end = struct
         offset)
         end
 end
+
+structure Hash = struct
+  fun hashContent (content: Word8Vector.vector) = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+end
+
+structure HashTable = struct
+    val hash = HashArray.hash
+    type 'a hashTable = 'a HashArray.hash
+    val subscript  = HashArray.sub
+    val update = HashArray.update
+end
     
 (* Glusterfsd *)
-functor FileSystem (Hash : sig type content
-                                type hash
-                                val chunkSize: int
-                                val toContent: Word8Vector.vector -> content
-                                val hashContent : content -> hash
-                                val hashHash: hash * hash -> hash
-                                val serialize: content -> Word8Vector.vector
-                                val equal: hash*hash -> bool end) = struct
+structure FileSystem = struct
     (*
-
-    https://git.sr.ht/~mmagueta/relational-engine/tree/durability/item/src/main.cpp
+        https://git.sr.ht/~mmagueta/relational-engine/tree/durability/item/src/main.cpp
         compute hash out of the content
         check if hashToReplace is NONE
         if empty then append to a disk file (/tmp/canteen/storage will do) getting the offset and size written
@@ -117,69 +105,59 @@ functor FileSystem (Hash : sig type content
         return the location added
         call it a day xD
     *)
-    type FilesTable = Hash.hash list HashArray.hash
+    type FilesTable = string list HashTable.hashTable
     type Location = {position: Position.int, size: int}
-    type LocationsTable = Location HashArray.hash
+    type LocationsTable = Location HashTable.hashTable
     fun assureFileExists (filename: string) = (
         
     )
     fun fopen (fileName: string, files: FilesTable): FilesTable = 
         let val realStoragePath = "/tmp/canteen/storage"
-            val hashValue: Hash.hash list option = HashArray.sub (files, fileName)
-            val emptyHash: Word8Vector.vector = Byte.stringToBytes "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            val hashValue: string list option = HashTable.subscript (files, fileName)
+            val emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         in case hashValue
-            of NONE => (HashArray.update (files, fileName, [Hash.hashContent (Hash.toContent emptyHash)]); files)
+            of NONE => (HashTable.update (files, fileName, [emptyHash]); files)
             | SOME _ => files
         end
-    fun fread (fileName: string) (quantity: int) (offset: Hash.hash option) = 
+    fun fread (fileName: string) (quantity: int) (offset: string option) = 
         raise Fail ":("
-    fun fwrite (files: FilesTable, locations: LocationsTable, fileName: string, content: Hash.content, hashToReplace: Hash.hash option): FilesTable * LocationsTable = 
-        let val currentHashOfFile = HashArray.sub (files, fileName)
-            val serializedContent = Hash.serialize content
+    fun fwrite (files: FilesTable, locations: LocationsTable, fileName: string, content: Word8Vector.vector, hashToReplace: string option): FilesTable * LocationsTable = 
+        let val currentHashOfFile: string list option = HashTable.subscript (files, fileName)
             val hashedContent = Hash.hashContent content
             fun appendOnly (): unit =
                 case currentHashOfFile 
-                of SOME currentHashOfFile => HashArray.update (files, fileName, hashedContent::currentHashOfFile)
+                of SOME currentHashOfFile => HashTable.update (files, fileName, hashedContent::currentHashOfFile)
                 |  NONE => raise Fail "Unreachable"
-            fun appendInPlace (hashToReplace: Hash.hash) =
+            fun appendInPlace (hashToReplace: string) =
                 case currentHashOfFile
-                of SOME currentHashOfFile => 
-                    HashArray.update (files, fileName, List.map (fn hash => if Hash.equal (hash, hashToReplace) then hashToReplace else hash) currentHashOfFile)
+                of SOME currentHashOfFile =>
+                    HashTable.update (files, fileName, List.map (fn hash => if hash = hashToReplace then hashToReplace else hash) currentHashOfFile)
                 |  NONE => raise Fail "Unreachable"
         in case hashToReplace
         of NONE => (
             appendOnly ();
-            HashArray.update (locations, hashedContent, {position = Data.set fileName NONE serializedContent, size = Word8Vector.length serializedContent});
+            HashTable.update (locations, hashedContent, {position = Data.set fileName NONE content, size = Word8Vector.length content});
             (files, locations)
         )
         | SOME hashToReplace => (
             appendInPlace hashToReplace;
-            HashArray.update (locations, hashedContent, {position = Data.set fileName NONE serializedContent, size = Word8Vector.length serializedContent});
+            HashTable.update (locations, hashedContent, {position = Data.set fileName NONE content, size = Word8Vector.length content});
             (files, locations)
         )
         end
 end
 
 (* Glusterd *)
-functor BookKeeper (Hash : sig type content
-                                   type hash
-                                   val chunkSize: int
-                                   val toContent: Word8Vector.vector -> content
-                                   val hashContent : content -> hash
-                                   val serialize: content -> Word8Vector.vector
-                                   val equal: hash * hash -> bool
-                                   val hashHash: hash * hash -> hash end) = struct
+functor BookKeeper () = struct
     type Location = {position: int, size: int}
     
-    val files: Hashable.hash HashArray.hash =
-        HashArray.hash 10 (* File -> Hash *)
+    val files: FileSystem.FilesTable ref =
+        ref (HashArray.hash 10) (* File -> Hash *)
     
-    val locations: Location list HashArray.hash =
-        HashArray.hash 10 (* Hash -> Locations *)
+    val locations: FileSystem.LocationsTable ref =
+        ref (HashArray.hash 10) (* Hash -> Locations *)
     
-    structure Tree = MerkleTree (Hash)
-
-    structure FileSystem = FileSystem(Hash)
+    structure Tree = MerkleTree ()
 
     (* fun filesTableEncoder (table: Hashable.hash HashArray.hash) : Word8Vector.vector =
 	let fun foldAux (key, value, acc) =
@@ -203,9 +181,9 @@ functor BookKeeper (Hash : sig type content
 	in Word8Vector.concat (HashArray.fold foldAux nil table)
 	end *)
 	    
-    fun serialize filepath data encoder : unit =
+    fun serialize filepath data encoder =
         let val serializedData = encoder data
-        in Data.set filepath NONE serializedData				     
+        in Data.set filepath NONE serializedData
         end
 
     fun deserialize filepath decoder =
@@ -218,13 +196,17 @@ functor BookKeeper (Hash : sig type content
         let val EOT = Char.chr 4
 	        fun action (buffer: string): unit =
 		        let val command = Payload.deserialize buffer
+                    val files: FileSystem.FilesTable = !files
                 in case command
                     of Payload.OPEN _ => raise Fail "Bomb"
                     | Payload.READ _ => raise Fail "Bomb"
                     | Payload.WRITE {filename = filename, content = content} =>
                     (* TODO: Add here a check for the chunkSize and the merkle tree structure *)
                     (* (files: FilesTable, locations: LocationsTable, fileName: string, content: Hash.content, hashToReplace: Hash.hash option): FilesTable * LocationsTable *)
-                        FileSystem.fwrite(files, locations, "/tmp/canteen/" ^ filename, Hash.toContent content, NONE)
+                        let val (x: FileSystem.FilesTable, y: FileSystem.LocationsTable) = 
+                            FileSystem.fwrite(files, !locations, "/tmp/canteen/" ^ filename, content, NONE)
+                        in files := x; locations := y
+                        end
                 end
             fun handler socket: unit = action(Communication.receiveUntil EOT socket)
         in Communication.spawn handler 7778 5
