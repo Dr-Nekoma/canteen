@@ -1,8 +1,0 @@
-Group is
-    src/util.sml
-    src/merkle.sml
-    src/communication.sml
-    src/book_keeper.sml
-    tests/merkle.sml
-    tests/communication.sml
-    build.sml
