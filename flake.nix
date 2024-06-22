@@ -1,13 +1,9 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    devenv = {
-      url = "github:cachix/devenv";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, devenv, zig2nix, ... } @ inputs:
+  outputs = { self, nixpkgs, ... } @ inputs:
     let
       systems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = f: builtins.listToAttrs (map (name: { inherit name; value = f name; }) systems);
@@ -35,12 +31,6 @@
       };
     in
       {
-        packages = forAllSystems (system:
-          let
-            pkgs = nixpkgs.legacyPackages."${system}";
-          in {
-            devenv-up = self.devShells.${system}.default.config.procfileScript;
-          });
 
       apps = forAllSystems (system:
         let
@@ -65,30 +55,17 @@
           };
 
           # `nix develop`
-          default = devenv.lib.mkShell {
-            inherit inputs pkgs;
-            modules = [
-              ({ pkgs, lib, ... }: {
-                packages = with pkgs; [
-                  erlang-ls
-                  erlfmt
-                  just
-                  rebar3
-                ] ++ lib.optionals stdenv.isLinux (linuxPkgs) ++ lib.optionals stdenv.isDarwin darwinPkgs;
-
-                languages.erlang = {
-                  enable = true;
-                  package = erlangLatest;
-                };
-
-                env = mkEnvVars pkgs erlangLatest erlangLibs;
-
-                enterShell = ''
-                  echo "Starting Erlang environment..."
-                  rebar3 get-deps
-                '';
-              })
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              erlang-ls
+              erlfmt
+              just
+              rebar3
             ];
+            shellHook = ''
+              echo "Starting Erlang environment..."
+              rebar3 get-deps
+            '';
           };
         });
     };

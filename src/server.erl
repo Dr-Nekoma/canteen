@@ -5,10 +5,8 @@
 -export([start/2, stop/1, main/1]).
 
 start(_, _) ->
-    Connection = database_connect(),
-    Pid = spawn(?MODULE, handle_message, [Connection]),
-    erlang:register(lyceum_server, Pid),
-    {ok, Pid}.
+    io:fwrite("Hello World\n"),
+    {ok, self()}.
 
 stop(_) ->
     ok.
