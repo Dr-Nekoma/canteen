@@ -1,6 +1,15 @@
 -module(disk).
 
--export([keeper/1, main/0]).
+-export([keeper/1, main/0, compose/1, bootstrap/0]).
+
+-record(files, {name, hashes}).
+-record(locations, {hash, offset, size}).
+
+bootstrap() ->
+    mnesia:create_schema([node()]),
+    mnesia:start(),
+    mnesia:create_table(files, [{attributes, record_info(fields, files)}]),
+    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}]).
 
 keeper(HashTable, Pid, updated) ->
     Pid ! ok,
@@ -23,28 +32,47 @@ keeper(HashTable) ->
         stop -> ok
     end.
 
-%% compose([{write, Filename, Content} | Tail]) ->
-%%     Hash = crypto:hash(sha256, Content),
-%%     FilesCommand = (fun (HashTable) ->
-%%                             Default = [],
-%%                             [C|Cs] = maps:get(Filename, HashTable, Default),
-%%                             maps:put(Filename, [[Hash|C],C|Cs], HashTable) end),
-%%     %% Write to mnesia (our WAL) here the commit to effectively change the file later
-%%     LocationsCommand = (fun (HashTable) ->
-%%                             case maps:get(Hash, HashTable, garbage) of
-%%                                 garbage -> gotta_write;
-%%                                 #{size := _, offset := _} -> ok
-%%                             end,
-%%                             maps:put(Filename, [[Hash|C],C|Cs], HashTable) end),
-%%     [{FilesCommand, LocationsCommand} | compose(Tail)].
+compose([{write, Filename, Content} | Tail]) ->
+    Hash = crypto:hash(sha256, Content),
+    FilesCommand = (fun () ->
+                            case mnesia:read(files, Filename) of
+				[] -> 
+				    mnesia:write(files, #files{name = Filename, hashes = [Hash]
+});
+				[Latest|Rest] ->
+				    mnesia:write(files, #files{name = Filename, hashes = [[Hash|Latest],Latest|Rest]})
+			    end
+		    end),
+    LocationsCommand = (fun () ->
+				case mnesia:read(locations, Hash) of
+				    [] -> case mnesia:read(offset, Filename) of
+					      [] ->
+						  Location = #locations{hash = Hash, size = length(Content), offset = 0},
+						  mnesia:write(Location);
+					      [Offset] ->
+						  Location = #locations{hash = Hash, size = length(Content), offset = Offset},
+						  mnesia:write(Location)
+					  end;
+				    [_] -> already_registered
+				end
+			end),
+    [{FilesCommand, LocationsCommand} | compose(Tail)];
+
+compose([]) -> [].
 
 main() ->
     %% Files :: Filename => Hash list list
-    FilesProc = spawn(?MODULE, keeper, [nothing]),
+    %% FilesProc = spawn(?MODULE, keeper, [nothing]),
     %% Locations :: Hash => {size : int; offset: int}
-    LocationsProc = spawn(?MODULE, keeper, [nothing]),
-    %% compose([{write, "blacklist", <<"catboys">>},
+    %% LocationsProc = spawn(?MODULE, keeper, [nothing]),
+    Commands = compose([{write, "blacklist", <<"catboys">>}]),
              %% {write, "blacklist", <<"maidboys">>, <<"123">>}]),
+    io:format("~p\n", [Commands]),
+    [{FileCommand, LocationCommand}|_] = Commands,
+    Res1 = mnesia:transaction(FileCommand),
+    Res2 = mnesia:transaction(LocationCommand),
+    io:format("First: ~p\n", [Res1]),
+    io:format("Second: ~p\n", [Res2]),
     ok.
 
 %% [[3],
