@@ -1,6 +1,6 @@
 -module(disk).
 
--export([keeper/1, main/0, compose/1, bootstrap/0]).
+-export([keeper/1, main/0, compose/1, bootstrap/0, match_command/1, accept/1]).
 
 -record(files, {name, hashes}).
 -record(locations, {hash, offset, size}).
@@ -102,11 +102,46 @@ compose(Commands) ->
 		{[], (fun () -> ok end)},
 		lists:map(fun (X) -> create_command(X) end, Commands)).
 
+
+match_command(<<Operation:1/binary,
+		BinFileNameLength:4/binary,
+		BinContentLength:4/binary,
+		Rest/binary>>) ->
+    FileNameLength = binary:decode_unsigned(BinFileNameLength, big),
+    ContentLength = binary:decode_unsigned(BinContentLength, big),
+    <<FileName:FileNameLength/binary, Content:ContentLength/binary, _/binary>> = Rest,
+    case Operation of
+	<<"W">> -> io:format("~p\n~p\n", [FileName, Content]);
+	_ -> nope
+    end.
+
+
+accept(Port) ->
+    {ok, Socket} = gen_tcp:listen(Port, [binary, {active, true}, {packet, 0}, {reuseaddr, true}]),
+    io:format("Listening: ~p~n", [Port]),
+    server(Socket).
+
+server(Socket) ->
+    {ok, Connection} = gen_tcp:accept(Socket),
+    Handler = spawn(fun () -> loop(Connection) end),
+    gen_tcp:controlling_process(Connection, Handler),
+    server(Socket).
+
+loop(Connection) ->
+    receive
+	% Bound var in patten as intended.
+        {tcp, Connection, Data} ->
+	    match_command(Data),
+	    loop(Connection);
+	{tcp_closed, Connection} -> connection_closed
+    end.
+
 main() ->
     %% Files :: Filename => Hash list list
     %% FilesProc = spawn(?MODULE, keeper, [nothing]),
     %% Locations :: Hash => {size : int; offset: int}
     %% LocationsProc = spawn(?MODULE, keeper, [nothing]),
+    %% LocationsProc = spawn(?MODULE, server, []),
     {Hashes, Operations} = compose([{write, "blacklist", <<"catboys">>}]),
     Res = mnesia:transaction(Operations),
     {_, NewOperations} = compose([{write, "blacklist", <<"maidboys">>, hd(Hashes)}]),
@@ -120,6 +155,10 @@ main() ->
 	    end),
     Res3 = mnesia:transaction(Read),
     io:format("Stage 3: ~p\n", [Res3]),
+    %% FileSize = binary:encode_unsigned(3),
+    %% ContentSize = binary:encode_unsigned(4),
+    %% Content = binary:encode_unsigned(1),
+    %% Message2 = <<"W",FileSize,ContentSize,0,0,0,0,0,0,0,0,"abc",Content>>,
     ok.
 
 %% [[3],
