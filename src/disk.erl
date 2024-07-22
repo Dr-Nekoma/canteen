@@ -111,7 +111,11 @@ match_command(<<Operation:1/binary,
     ContentLength = binary:decode_unsigned(BinContentLength, big),
     <<FileName:FileNameLength/binary, Content:ContentLength/binary, _/binary>> = Rest,
     case Operation of
-	<<"W">> -> io:format("~p\n~p\n", [FileName, Content]);
+	<<"W">> -> 
+	    {Hashes, Operations} = compose([{write, erlang:binary_to_list(FileName), Content}]),
+	    Res = mnesia:transaction(Operations),
+	    io:format("~p\n~p\n", [Res, Hashes]),
+	    {Hashes, Res};
 	_ -> nope
     end.
 
@@ -123,16 +127,26 @@ accept(Port) ->
 
 server(Socket) ->
     {ok, Connection} = gen_tcp:accept(Socket),
-    Handler = spawn(fun () -> loop(Connection) end),
+    Handler = spawn(fun () -> loop(Connection, Socket) end),
     gen_tcp:controlling_process(Connection, Handler),
     server(Socket).
 
-loop(Connection) ->
+loop(Connection, Socket) ->
     receive
 	% Bound var in patten as intended.
         {tcp, Connection, Data} ->
-	    match_command(Data),
-	    loop(Connection);
+	    {Hashes, _} = match_command(Data),
+	    io:format("Hashes: ~p\n", [Hashes]),
+	    gen_tcp:send(Socket, "Abc");
+	    %% case gen_tcp:send(Socket, "Abc") of
+            %%     {error, timeout} ->
+            %%         io:format("Send timeout, closing!~n",
+            %%                   []);
+            %%     {error, OtherSendError} ->
+            %%         io:format("Some other error on socket (~p), closing",
+            %%                   [OtherSendError]);
+            %%     ok -> loop(Connection, Socket)
+            %% end;
 	{tcp_closed, Connection} -> connection_closed
     end.
 
