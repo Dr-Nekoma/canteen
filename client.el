@@ -18,8 +18,11 @@
     (set-process-filter connection 'canteen-handler)
     (process-send-string connection content)))
 
-;; Message = "W00030004abc0001"
-(let ((message (string ?W ?\C-@ ?\C-@ ?\C-@ ?\C-c ?\C-@ ?\C-@ ?\C-@ ?\C-d ?a ?b ?c ?\C-@ ?\C-@ ?\C-@ ?\C-a)))
+;; Message = "W~00030004abc0001"
+(let ((message (string ?W ?~ ?\C-@ ?\C-@ ?\C-@ ?\C-c ?\C-@ ?\C-@ ?\C-@ ?\C-d ?a ?b ?c ?\C-@ ?\C-@ ?\C-@ ?\C-a)))
+  (canteen-client message))
+
+(let ((message (string ?R ?^ ?\C-@ ?\C-@ ?\C-@ ?\C-c ?a ?b ?c)))
   (canteen-client message))
 
 (print *mailbox*)

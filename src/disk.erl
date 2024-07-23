@@ -6,6 +6,11 @@
 -record(locations, {hash, offset, size}).
 -record(cursor, {filename, offset}).
 
+-compile({inline, [neutral_hash/0]}).
+neutral_hash() ->
+    %% crypto:hash(sha256, "")
+    <<"~">>.
+
 bootstrap() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
@@ -35,7 +40,8 @@ keeper(HashTable) ->
     end.
 
 create_command({write, Filename, Content}) ->
-    Hash = crypto:hash(sha256, Content),
+    Hash = <<"^">>,
+%% crypto:hash(sha256, Content),
     Function = (fun () ->
 			case mnesia:read(files, Filename) of
 			    [] -> 
@@ -93,32 +99,68 @@ create_command({write, Filename, Content, HashToReplace}) ->
 			    [Cursor] -> mnesia:write(#cursor{filename = Filename, offset = Cursor#cursor.offset + erlang:byte_size(Content)})
 			end
 		end),
+    {Hash, Function};
+
+create_command({read, Filename, Hash}) ->
+    Function = (fun () ->
+			NeutralHash = neutral_hash(),
+			if NeutralHash == Hash -> nothing;
+			   true -> case mnesia:read(locations, Hash) of
+				       [] -> nothing;
+				       [{_, Offset, Size}] -> 
+					   case erlang:open(Filename, read) of
+					       {error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
+					       {ok, Device} -> case erlang:pread(Device, Offset, Size) of
+								   {ok, Data} -> 
+								       io:format("Data: ~p\n", [Data]),
+								       Data;
+								   {error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
+								   eof -> 
+								       io:format("This is a print\n", []),
+								       eof
+							       end
+					   end;
+				       _ -> duplicated_inconsistent_entries
+				   end
+			end
+		end),
     {Hash, Function}.
 
 compose([]) -> fun () -> nothing end;
 
 compose(Commands) ->
-    lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun () -> Function(), FunAcc() end)} end, 
-		{[], (fun () -> ok end)},
+    lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun (Data) -> Function(), FunAcc(), Data end)} end, 
+		{[], (fun (Data) -> Data end)},
 		lists:map(fun (X) -> create_command(X) end, Commands)).
 
-
-match_command(<<Operation:1/binary,
+match_command(<<"W",
+		HashToReplace:1/binary,
 		BinFileNameLength:4/binary,
 		BinContentLength:4/binary,
 		Rest/binary>>) ->
+    io:format("HashToReplace: ~p\nBinFileNameLength: ~p\nBinContentLength: ~p\nRest: ~p\n", [HashToReplace,
+											     BinFileNameLength,
+											     BinContentLength,
+											     Rest]),
     FileNameLength = binary:decode_unsigned(BinFileNameLength, big),
     ContentLength = binary:decode_unsigned(BinContentLength, big),
-    <<FileName:FileNameLength/binary, Content:ContentLength/binary, _/binary>> = Rest,
-    case Operation of
-	<<"W">> -> 
-	    {Hashes, Operations} = compose([{write, erlang:binary_to_list(FileName), Content}]),
-	    Res = mnesia:transaction(Operations),
-	    io:format("~p\n~p\n", [Res, Hashes]),
-	    {Hashes, Res};
-	_ -> nope
-    end.
+    <<FileName:FileNameLength/binary, Content:ContentLength/binary, Remaining/binary>> = Rest,
+    NeutralHash = neutral_hash(),
+    Command = if NeutralHash == HashToReplace 
+		 -> {write, erlang:binary_to_list(FileName), Content};
+		 true -> {write, erlang:binary_to_list(FileName), Content, HashToReplace}
+	      end,
+    [Command|match_command(Remaining)];
 
+match_command(<<"R",
+		HashToRetrieve:1/binary,
+		BinFileNameLength:4/binary,
+		Rest/binary>>) ->
+    FileNameLength = binary:decode_unsigned(BinFileNameLength, big),
+    <<FileName:FileNameLength/binary, Remaining/binary>> = Rest,
+    [{read, erlang:binary_to_list(FileName), HashToRetrieve}|match_command(Remaining)];
+
+match_command(<<>>) -> [].
 
 accept(Port) ->
     {ok, Socket} = gen_tcp:listen(Port, [binary, {active, true}, {packet, 0}, {reuseaddr, true}]),
@@ -127,26 +169,27 @@ accept(Port) ->
 
 server(Socket) ->
     {ok, Connection} = gen_tcp:accept(Socket),
-    Handler = spawn(fun () -> loop(Connection, Socket) end),
+    Handler = spawn(fun () -> loop(Connection) end),
     gen_tcp:controlling_process(Connection, Handler),
     server(Socket).
 
-loop(Connection, Socket) ->
+loop(Connection) ->
     receive
 	% Bound var in patten as intended.
         {tcp, Connection, Data} ->
-	    {Hashes, _} = match_command(Data),
-	    io:format("Hashes: ~p\n", [Hashes]),
-	    gen_tcp:send(Socket, "Abc");
-	    %% case gen_tcp:send(Socket, "Abc") of
-            %%     {error, timeout} ->
-            %%         io:format("Send timeout, closing!~n",
-            %%                   []);
-            %%     {error, OtherSendError} ->
-            %%         io:format("Some other error on socket (~p), closing",
-            %%                   [OtherSendError]);
-            %%     ok -> loop(Connection, Socket)
-            %% end;
+	    Operations = match_command(Data),
+	    {Hashes, Transaction} = compose(Operations),
+	    {atomic, Response} = mnesia:transaction(Transaction),
+	    %% io:format("Response: ~p\n", [Response]),
+	    case gen_tcp:send(Connection, Response) of
+                {error, timeout} ->
+                    io:format("Send timeout, closing!~n",
+                              []);
+                {error, OtherSendError} ->
+                    io:format("Some other error on socket (~p)",
+                              [OtherSendError]);
+                ok -> loop(Connection)
+            end;
 	{tcp_closed, Connection} -> connection_closed
     end.
 
