@@ -5,6 +5,7 @@
 -record(files, {name, hashes}).
 -record(locations, {hash, offset, size}).
 -record(cursor, {filename, offset}).
+-record(content, {filename, data}).
 
 -compile({inline, [neutral_hash/0]}).
 neutral_hash() ->
@@ -16,7 +17,8 @@ bootstrap() ->
     mnesia:start(),
     mnesia:create_table(files, [{attributes, record_info(fields, files)}]),
     mnesia:create_table(cursor, [{attributes, record_info(fields, cursor)}]),
-    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}]).
+    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}]),
+    mnedia:create_table(content, [{attributes, record_info(fields, content)}]).
 
 keeper(HashTable, Pid, updated) ->
     Pid ! ok,
@@ -56,10 +58,10 @@ create_command({write, Filename, Content}) ->
 					  mnesia:write(Location);
 				      [{_,_,Offset}] ->
 					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = Offset},
-					  mnesia:write(Location)
+					  mnesia:write(Location)					      
 				  end;
 			    [_] -> already_registered
-			end,
+			end,			
 			case mnesia:read(cursor, Filename) of
 			    [] -> mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
 			    [Cursor] -> mnesia:write(#cursor{filename = Filename, offset = Cursor#cursor.offset + erlang:byte_size(Content)})
@@ -104,10 +106,10 @@ create_command({write, Filename, Content, HashToReplace}) ->
 create_command({read, Filename, Hash}) ->
     Function = (fun () ->
 			NeutralHash = neutral_hash(),
-			if NeutralHash == Hash -> nothing;
+			if NeutralHash == Hash -> <<>>;
 			   true -> case mnesia:read(locations, Hash) of
-				       [] -> nothing;
-				       [{_, Offset, Size}] -> 
+				       [] -> could_not_find_data;
+				       [{locations, Hash, Offset, Size}] -> 
 					   case erlang:open(Filename, read) of
 					       {error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
 					       {ok, Device} -> case erlang:pread(Device, Offset, Size) of
@@ -120,18 +122,20 @@ create_command({read, Filename, Hash}) ->
 								       eof
 							       end
 					   end;
-				       _ -> duplicated_inconsistent_entries
+				       WTF -> io:format("WTF: ~p\n", [WTF]), 
+					      duplicated_inconsistent_entries
 				   end
 			end
 		end),
     {Hash, Function}.
 
-compose([]) -> fun () -> nothing end;
+compose([]) -> fun (Data) -> Data end;
 
 compose(Commands) ->
-    lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun (Data) -> Function(), FunAcc(), Data end)} end, 
-		{[], (fun (Data) -> Data end)},
-		lists:map(fun (X) -> create_command(X) end, Commands)).
+    {Hashes, Function} = lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun (_) -> FunAcc(Function()) end)} end, 
+				     {[], (fun (Data) -> Data end)},
+				     lists:map(fun (X) -> create_command(X) end, Commands)),
+    {Hashes, (fun () -> Function(abc) end)}.	
 
 match_command(<<"W",
 		HashToReplace:1/binary,
@@ -179,9 +183,9 @@ loop(Connection) ->
         {tcp, Connection, Data} ->
 	    Operations = match_command(Data),
 	    {Hashes, Transaction} = compose(Operations),
-	    {atomic, Response} = mnesia:transaction(Transaction),
-	    %% io:format("Response: ~p\n", [Response]),
-	    case gen_tcp:send(Connection, Response) of
+	    Response = mnesia:transaction(Transaction),
+	    io:format("Response: ~p\n", [Response]),
+	    case gen_tcp:send(Connection, Hashes) of
                 {error, timeout} ->
                     io:format("Send timeout, closing!~n",
                               []);
