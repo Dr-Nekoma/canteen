@@ -21,8 +21,8 @@ test() ->
     File = #files{name = "russian_dish", hashes = ["hash1", "hash2"]},
     insert_files(File),
     F = fun() ->
-		[E] = mnesia:read(files, "russian_dish"),
-		io:format("Files ~p\n", [E])
+           [E] = mnesia:read(files, "russian_dish"),
+           io:format("Files ~p\n", [E])
         end,
     mnesia:transaction(F).
 
@@ -31,21 +31,20 @@ test2() ->
     File = #files{name = "many_dishes", hashes = ["hash1", "kodujuust"]},
     insert_files(File),
     F = fun() ->
-		[E] = mnesia:read(files, "many_dishes"),
-                NewHashes = lists:append(E#files.hashes, ["couscous", "toad in a hole"]),
-                New = E#files{hashes = NewHashes},
-                mnesia:write(New)
+           [E] = mnesia:read(files, "many_dishes"),
+           NewHashes = lists:append(E#files.hashes, ["couscous", "toad in a hole"]),
+           New = E#files{hashes = NewHashes},
+           mnesia:write(New)
         end,
     mnesia:transaction(F),
     Q = fun() ->
-		[E] = mnesia:read(files, "many_dishes"),
-		io:format("Files ~p\n", [E])
+           [E] = mnesia:read(files, "many_dishes"),
+           io:format("Files ~p\n", [E])
         end,
     mnesia:transaction(Q).
 
-    
-
 %% insert_file(Name, Hashes) ->
+
     %% mnesia:transaction(fun () -> mnesia:write(#files) end)
 
 start(_, _) ->
@@ -56,4 +55,4 @@ stop(_) ->
     ok.
 
 main(_) ->
-    start(none,none).
+    start(none, none).
