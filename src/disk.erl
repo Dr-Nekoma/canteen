@@ -15,10 +15,10 @@ neutral_hash() ->
 bootstrap() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
-    mnesia:create_table(files, [{attributes, record_info(fields, files)}]),
-    mnesia:create_table(cursor, [{attributes, record_info(fields, cursor)}]),
-    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}]),
-    mnedia:create_table(content, [{attributes, record_info(fields, content)}]).
+    mnesia:create_table(files, [{attributes, record_info(fields, files)}, {disc_copies, [node()]}]),
+    mnesia:create_table(cursor, [{attributes, record_info(fields, cursor)}, {disc_copies, [node()]}]),
+    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}, {disc_copies, [node()]}]),
+    mnesia:create_table(content, [{attributes, record_info(fields, content)}, {disc_copies, [node()]}]).
 
 keeper(HashTable, Pid, updated) ->
     Pid ! ok,
