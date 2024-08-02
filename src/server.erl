@@ -48,7 +48,8 @@ test2() ->
     %% mnesia:transaction(fun () -> mnesia:write(#files) end)
 
 start(_, _) ->
-    io:fwrite("Hello World\n"),
+    mnesia:start(),
+    disk:accept(1111),
     {ok, self()}.
 
 stop(_) ->
