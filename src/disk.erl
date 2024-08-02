@@ -8,6 +8,7 @@
 -record(content, {filename, data}).
 
 -compile({inline, [neutral_hash/0]}).
+
 neutral_hash() ->
     %% crypto:hash(sha256, "")
     <<"~">>.
@@ -15,10 +16,14 @@ neutral_hash() ->
 bootstrap() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
-    mnesia:create_table(files, [{attributes, record_info(fields, files)}, {disc_copies, [node()]}]),
-    mnesia:create_table(cursor, [{attributes, record_info(fields, cursor)}, {disc_copies, [node()]}]),
-    mnesia:create_table(locations, [{attributes, record_info(fields, locations)}, {disc_copies, [node()]}]),
-    mnesia:create_table(content, [{attributes, record_info(fields, content)}, {disc_copies, [node()]}]).
+    mnesia:create_table(files,
+                        [{attributes, record_info(fields, files)}, {disc_copies, [node()]}]),
+    mnesia:create_table(cursor,
+                        [{attributes, record_info(fields, cursor)}, {disc_copies, [node()]}]),
+    mnesia:create_table(locations,
+                        [{attributes, record_info(fields, locations)}, {disc_copies, [node()]}]),
+    mnesia:create_table(content,
+                        [{attributes, record_info(fields, content)}, {disc_copies, [node()]}]).
 
 keeper(HashTable, Pid, updated) ->
     Pid ! ok,
@@ -48,157 +53,202 @@ keeper(HashTable) ->
 
 create_command({write, Filename, Content}) ->
     Hash = <<"^">>,
-%% crypto:hash(sha256, Content),
-    Function = (fun () ->
-			case mnesia:read(files, Filename) of
-			    [] -> 
-				mnesia:write(#files{name = Filename, hashes = [Hash]});
-			    [{_,_,Latest}|Rest] ->
-				mnesia:write(#files{name = Filename, hashes = [[Hash|Latest],Latest|Rest]})
-			end,
-			case mnesia:read(locations, Hash) of
-			    [] -> case mnesia:read(cursor, Filename) of
-				      [] ->
-					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = 0},
-					  mnesia:write(Location);
-				      [{_,_,Offset}] ->
-					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = Offset},
-					  mnesia:write(Location)					      
-				  end;
-			    [_] -> already_registered
-			end,			
-			case mnesia:read(cursor, Filename) of
-			    [] -> mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
-			    [Cursor] -> mnesia:write(#cursor{filename = Filename, offset = Cursor#cursor.offset + erlang:byte_size(Content)})
-			end
-		end),
+    %% crypto:hash(sha256, Content),
+    Function =
+        fun() ->
+           case mnesia:read(files, Filename) of
+               [] ->
+                   mnesia:write(#files{name = Filename, hashes = [Hash]});
+               [{_, _, Latest} | Rest] ->
+                   mnesia:write(#files{name = Filename, hashes = [[Hash | Latest], Latest | Rest]})
+           end,
+           case mnesia:read(locations, Hash) of
+               [] ->
+                   case mnesia:read(cursor, Filename) of
+                       [] ->
+                           Location =
+                               #locations{hash = Hash,
+                                          size = erlang:byte_size(Content),
+                                          offset = 0},
+                           mnesia:write(Location);
+                       [{_, _, Offset}] ->
+                           Location =
+                               #locations{hash = Hash,
+                                          size = erlang:byte_size(Content),
+                                          offset = Offset},
+                           mnesia:write(Location)
+                   end;
+               [_] ->
+                   already_registered
+           end,
+           case mnesia:read(cursor, Filename) of
+               [] ->
+                   mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
+               [Cursor] ->
+                   mnesia:write(#cursor{filename = Filename,
+                                        offset = Cursor#cursor.offset + erlang:byte_size(Content)})
+           end
+        end,
     {Hash, Function};
 %% TODO: Refactor common parts between this and above
 create_command({write, Filename, Content, HashToReplace}) ->
     Hash = crypto:hash(sha256, Content),
-    Function = (fun () ->
-			case mnesia:read(files, Filename) of
-			    [] -> 
-				%% TODO: Let it crash, there is no hash to replace in this case
-				mnesia:write(#files{name = Filename, hashes = [Hash]});
-			    [{_,_,Latest}|Rest] ->
-				NewLatest = lists:map(fun (H) -> if H == HashToReplace -> Hash; true -> H end end, Latest),
-				Latestest = case lists:member(Hash, NewLatest) of
-						true -> NewLatest;
-						false -> [Hash|NewLatest] 
-					    end,
-				mnesia:write(#files{name = Filename, hashes = [Latestest,Latest|Rest]})
-			end,
-			case mnesia:read(locations, Hash) of
-			    [] -> case mnesia:read(cursor, Filename) of
-				      [] ->
-					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = 0},
-					  mnesia:write(Location);
-				      [{_,_,Offset}] ->
-					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = Offset},
-					  mnesia:write(Location)
-				  end;
-			    [_] -> already_registered
-			end,
-			case mnesia:read(cursor, Filename) of
-			    [] -> mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
-			    [Cursor] -> mnesia:write(#cursor{filename = Filename, offset = Cursor#cursor.offset + erlang:byte_size(Content)})
-			end
-		end),
+    Function =
+        fun() ->
+           case mnesia:read(files, Filename) of
+               [] ->
+                   %% TODO: Let it crash, there is no hash to replace in this case
+                   mnesia:write(#files{name = Filename, hashes = [Hash]});
+               [{_, _, Latest} | Rest] ->
+                   NewLatest =
+                       lists:map(fun(H) ->
+                                    if H == HashToReplace ->
+                                           Hash;
+                                       true ->
+                                           H
+                                    end
+                                 end,
+                                 Latest),
+                   Latestest =
+                       case lists:member(Hash, NewLatest) of
+                           true ->
+                               NewLatest;
+                           false ->
+                               [Hash | NewLatest]
+                       end,
+                   mnesia:write(#files{name = Filename, hashes = [Latestest, Latest | Rest]})
+           end,
+           case mnesia:read(locations, Hash) of
+               [] ->
+                   case mnesia:read(cursor, Filename) of
+                       [] ->
+                           Location =
+                               #locations{hash = Hash,
+                                          size = erlang:byte_size(Content),
+                                          offset = 0},
+                           mnesia:write(Location);
+                       [{_, _, Offset}] ->
+                           Location =
+                               #locations{hash = Hash,
+                                          size = erlang:byte_size(Content),
+                                          offset = Offset},
+                           mnesia:write(Location)
+                   end;
+               [_] ->
+                   already_registered
+           end,
+           case mnesia:read(cursor, Filename) of
+               [] ->
+                   mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
+               [Cursor] ->
+                   mnesia:write(#cursor{filename = Filename,
+                                        offset = Cursor#cursor.offset + erlang:byte_size(Content)})
+           end
+        end,
     {Hash, Function};
-
 create_command({read, Filename, Hash}) ->
-    Function = (fun () ->
-			NeutralHash = neutral_hash(),
-			if NeutralHash == Hash -> <<>>;
-			   true -> case mnesia:read(locations, Hash) of
-				       [] -> could_not_find_data;
-				       [{locations, Hash, Offset, Size}] -> 
-					   case erlang:open(Filename, read) of
-					       {error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
-					       {ok, Device} -> case erlang:pread(Device, Offset, Size) of
-								   {ok, Data} -> 
-								       io:format("Data: ~p\n", [Data]),
-								       Data;
-								   {error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
-								   eof -> 
-								       io:format("This is a print\n", []),
-								       eof
-							       end
-					   end;
-				       WTF -> io:format("WTF: ~p\n", [WTF]), 
-					      duplicated_inconsistent_entries
-				   end
-			end
-		end),
+    Function =
+        fun() ->
+           NeutralHash = neutral_hash(),
+           if NeutralHash == Hash ->
+                  <<>>;
+              true ->
+                  case mnesia:read(locations, Hash) of
+                      [] ->
+                          could_not_find_data;
+                      [{locations, Hash, Offset, Size}] ->
+                          case erlang:open(Filename, read) of
+                              {error, Reason} ->
+                                  io:format("ERROR: ~p\n", [Reason]);
+                              {ok, Device} ->
+                                  case erlang:pread(Device, Offset, Size) of
+                                      {ok, Data} ->
+                                          io:format("Data: ~p\n", [Data]),
+                                          Data;
+                                      {error, Reason} ->
+                                          io:format("ERROR: ~p\n", [Reason]);
+                                      eof ->
+                                          io:format("This is a print\n", []),
+                                          eof
+                                  end
+                          end;
+                      WTF ->
+                          io:format("WTF: ~p\n", [WTF]),
+                          duplicated_inconsistent_entries
+                  end
+           end
+        end,
     {Hash, Function}.
 
-compose([]) -> fun (Data) -> Data end;
-
+compose([]) ->
+    fun(Data) -> Data end;
 compose(Commands) ->
-    {Hashes, Function} = lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun (_) -> FunAcc(Function()) end)} end, 
-				     {[], (fun (Data) -> Data end)},
-				     lists:map(fun (X) -> create_command(X) end, Commands)),
-    {Hashes, (fun () -> Function(abc) end)}.	
+    {Hashes, Function} =
+        lists:foldr(fun({Hash, Function}, {HashAcc, FunAcc}) ->
+                       {[Hash | HashAcc], fun(_) -> FunAcc(Function()) end}
+                    end,
+                    {[], fun(Data) -> Data end},
+                    lists:map(fun(X) -> create_command(X) end, Commands)),
+    {Hashes, fun() -> Function(abc) end}.
 
 match_command(<<"W",
-		HashToReplace:1/binary,
-		BinFileNameLength:4/binary,
-		BinContentLength:4/binary,
-		Rest/binary>>) ->
-    io:format("HashToReplace: ~p\nBinFileNameLength: ~p\nBinContentLength: ~p\nRest: ~p\n", [HashToReplace,
-											     BinFileNameLength,
-											     BinContentLength,
-											     Rest]),
+                HashToReplace:1/binary,
+                BinFileNameLength:4/binary,
+                BinContentLength:4/binary,
+                Rest/binary>>) ->
+    io:format("HashToReplace: ~p\nBinFileNameLength: ~p\nBinContentLength: ~p\nRest: ~p\n",
+              [HashToReplace, BinFileNameLength, BinContentLength, Rest]),
     FileNameLength = binary:decode_unsigned(BinFileNameLength, big),
     ContentLength = binary:decode_unsigned(BinContentLength, big),
     <<FileName:FileNameLength/binary, Content:ContentLength/binary, Remaining/binary>> = Rest,
     NeutralHash = neutral_hash(),
-    Command = if NeutralHash == HashToReplace 
-		 -> {write, erlang:binary_to_list(FileName), Content};
-		 true -> {write, erlang:binary_to_list(FileName), Content, HashToReplace}
-	      end,
-    [Command|match_command(Remaining)];
-
+    Command =
+        if NeutralHash == HashToReplace ->
+               {write, erlang:binary_to_list(FileName), Content};
+           true ->
+               {write, erlang:binary_to_list(FileName), Content, HashToReplace}
+        end,
+    [Command | match_command(Remaining)];
 match_command(<<"R",
-		HashToRetrieve:1/binary,
-		BinFileNameLength:4/binary,
-		Rest/binary>>) ->
+                HashToRetrieve:1/binary,
+                BinFileNameLength:4/binary,
+                Rest/binary>>) ->
     FileNameLength = binary:decode_unsigned(BinFileNameLength, big),
     <<FileName:FileNameLength/binary, Remaining/binary>> = Rest,
-    [{read, erlang:binary_to_list(FileName), HashToRetrieve}|match_command(Remaining)];
-
-match_command(<<>>) -> [].
+    [{read, erlang:binary_to_list(FileName), HashToRetrieve} | match_command(Remaining)];
+match_command(<<>>) ->
+    [].
 
 accept(Port) ->
-    {ok, Socket} = gen_tcp:listen(Port, [binary, {active, true}, {packet, 0}, {reuseaddr, true}]),
+    {ok, Socket} =
+        gen_tcp:listen(Port, [binary, {active, true}, {packet, 0}, {reuseaddr, true}]),
     io:format("Listening: ~p~n", [Port]),
     server(Socket).
 
 server(Socket) ->
     {ok, Connection} = gen_tcp:accept(Socket),
-    Handler = spawn(fun () -> loop(Connection) end),
+    Handler = spawn(fun() -> loop(Connection) end),
     gen_tcp:controlling_process(Connection, Handler),
     server(Socket).
 
 loop(Connection) ->
     receive
-	% Bound var in patten as intended.
+        % Bound var in patten as intended.
         {tcp, Connection, Data} ->
-	    Operations = match_command(Data),
-	    {Hashes, Transaction} = compose(Operations),
-	    Response = mnesia:transaction(Transaction),
-	    io:format("Response: ~p\n", [Response]),
-	    case gen_tcp:send(Connection, Hashes) of
+            Operations = match_command(Data),
+            {Hashes, Transaction} = compose(Operations),
+            Response = mnesia:transaction(Transaction),
+            io:format("Response: ~p\n", [Response]),
+            case gen_tcp:send(Connection, Hashes) of
                 {error, timeout} ->
-                    io:format("Send timeout, closing!~n",
-                              []);
+                    io:format("Send timeout, closing!~n", []);
                 {error, OtherSendError} ->
-                    io:format("Some other error on socket (~p)",
-                              [OtherSendError]);
-                ok -> loop(Connection)
+                    io:format("Some other error on socket (~p)", [OtherSendError]);
+                ok ->
+                    loop(Connection)
             end;
-	{tcp_closed, Connection} -> connection_closed
+        {tcp_closed, Connection} ->
+            connection_closed
     end.
 
 main() ->
