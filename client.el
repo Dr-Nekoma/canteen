@@ -26,3 +26,9 @@
   (canteen-client message))
 
 (print *mailbox*)
+
+(string 98 ?w)
+
+(map (lambda (c) (cond ((and (>= c ?0) (<= c ?9)) (string ?\ c))
+		       (t c))
+       ())) 221F8AF2372A95064F2EF7D7712216A9AB46E7EF98482FD237E106F83EAA7569)
