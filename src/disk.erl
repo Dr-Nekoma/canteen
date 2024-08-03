@@ -50,16 +50,9 @@ keeper(HashTable) ->
 human_readable(Hash) -> erlang:binary_to_list(binary:encode_hex(Hash)).
 
 read_hash(Hash) ->
-	case file:open(Hash, read) of
-		{error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
-		{ok, Device} -> 
-			case file:pread(Device, 0) of
-				{ok, Data} -> human_readable(Data);
-				{error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
-				eof -> 
-					io:format("This is a print\n", []),
-				    ""
-			end
+	case file:read_file(Hash) of
+		{error, Reason} -> io:format("ERROR: ~p\n~p\n", [Hash, Reason]);
+		{ok, Data} -> Data
 	end.
 
 create_command({write, Filename, Content}) ->
@@ -137,7 +130,9 @@ create_command({read, {filename, Name}}) ->
 			end),
 	{"", Function};
 
-create_command({read, {hash, Hash}}) -> {human_readable(Hash), read_hash(Hash)}.
+create_command({read, {hash, Hash}}) ->
+	HashName = erlang:binary_to_list(Hash),
+	{human_readable(Hash), (fun () -> read_hash(HashName) end)}.
 
 compose([]) -> fun (Data) -> Data end;
 
@@ -190,9 +185,9 @@ loop(Connection) ->
 		{tcp, Connection, Data} ->
 		Operations = match_command(Data),
 		{Hashes, Transaction} = compose(Operations),
-		Response = mnesia:transaction(Transaction),
+		{atomic,Response} = mnesia:transaction(Transaction),
 		io:format("Response: ~p\n", [Response]),
-		case gen_tcp:send(Connection, Hashes) of
+		case gen_tcp:send(Connection, Response) of
 				{error, timeout} ->
 					io:format("Send timeout, closing!~n",
 							  []);
