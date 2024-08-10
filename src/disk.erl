@@ -1,6 +1,6 @@
 -module(disk).
 
--export([keeper/1, main/0, compose/1, bootstrap/0, match_command/1, accept/1]).
+-export([keeper/1, main/0, compose/1, bootstrap/0, match_command/1, accept/1, human_readable/1]).
 
 -record(files, {name, hashes}).
 -record(locations, {hash, size}).
@@ -37,6 +37,14 @@ keeper(HashTable) ->
 		stop -> ok
 	end.
 
+human_readable(Hash) -> erlang:binary_to_list(binary:encode_hex(Hash)).
+
+read_hash(Hash) ->
+	case file:read_file(Hash) of
+		{error, Reason} -> io:format("ERROR: ~p\n~p\n", [Hash, Reason]);
+		{ok, Data} -> Data
+	end.
+
 % In a transaction, writing operation
 % Generate unique value, and use that to create temporary file
 % Flush the content into the temporary file
@@ -47,76 +55,32 @@ keeper(HashTable) ->
 % If we fail at any point:
 % Either fail during the write or after writing and during the renaming
 
-human_readable(Hash) -> erlang:binary_to_list(binary:encode_hex(Hash)).
-
-read_hash(Hash) ->
-	case file:read_file(Hash) of
-		{error, Reason} -> io:format("ERROR: ~p\n~p\n", [Hash, Reason]);
-		{ok, Data} -> Data
-	end.
-
-create_command({write, Filename, Content}) ->
-	%Hash = <<"^">>,
+create_command({write, VirtualFileName, Content}) ->
+    TmpFileName = human_readable(rand:bytes(10)),
+    {ok, TmpDevice} = file:open("/tmp/canteen/" ++ TmpFileName, write),
+    ok = file:pwrite(TmpDevice, 0, Content),
     Hash = crypto:hash(sha256, Content),
-	Function = (fun () ->
-			case mnesia:read(files, Filename) of
-				[] -> 
-				mnesia:write(#files{name = Filename, hashes = [Hash]});
-				[{_,_,Latest}|Rest] ->
-				mnesia:write(#files{name = Filename, hashes = [[Hash|Latest],Latest|Rest]})
+    Function = (fun () ->
+			case mnesia:read(files, VirtualFileName) of
+			    [] -> 
+				mnesia:write(#files{name = VirtualFileName, hashes = [Hash]});
+			    [{_,_,Latest} = _Trash|Rest] ->
+				%% MerkleHash = merkerl:hash_value(HashToReplace),
+				%% Tree = merkerl:new(Trash, fun merkerl:hash_value/1),
+				%% merkerl:root_hash(Tree),
+				%% ok = merkerl:verify_proof(MerkleHash, Tree, merkerl:gen_proof(MerkleHash, Tree)),
+				mnesia:write(#files{name = VirtualFileName, hashes = [[Hash|Latest],Latest|Rest]})
 			end,
+			file:rename("/tmp/canteen/" ++ TmpFileName, "/tmp/canteen/" ++ human_readable(Hash)),
 			case mnesia:read(locations, Hash) of
-				[] -> 
-					% TODO: Use a byte of the hash as a subdirectory to not have a gigantic main directory
-					Location = #locations{hash = Hash, size = erlang:byte_size(Content)},
-					HashName = human_readable(Location#locations.hash),
-					case file:open(HashName, write) of
-						{error, Reason} -> io:format("ERROR: ~p\n", [Reason]);
-						{ok, Device} -> 
-							case file:pwrite(Device, 0, Content) of
-								ok -> HashName;
-								{error, Reason} -> io:format("ERROR: ~p\n", [Reason])
-							end
-					end,
-					mnesia:write(Location);
-				[{_,_,Hash}] -> Hash
+			    [] ->
+				% TODO: Use a byte of the hash as a subdirectory to not have a gigantic main directory
+				Location = #locations{hash = Hash, size = erlang:byte_size(Content)},
+				mnesia:write(Location);
+			    [{locations,Hash,_}] -> Hash
 			end
 		end),
 	{human_readable(Hash), Function};
-
-%% TODO: Refactor common parts between this and above
-% create_command({write, Filename, Content, HashToReplace}) ->
-%	 Hash = crypto:hash(sha256, Content),
-%	 Function = (fun () ->
-% 			case mnesia:read(files, Filename) of
-% 				[] -> 
-% 				%% TODO: Let it crash, there is no hash to replace in this case
-% 				mnesia:write(#files{name = Filename, hashes = [Hash]});
-% 				[{_,_,Latest}|Rest] ->
-% 				NewLatest = lists:map(fun (H) -> if H == HashToReplace -> Hash; true -> H end end, Latest),
-% 				Latestest = case lists:member(Hash, NewLatest) of
-% 						true -> NewLatest;
-% 						false -> [Hash|NewLatest] 
-% 						end,
-% 				mnesia:write(#files{name = Filename, hashes = [Latestest,Latest|Rest]})
-% 			end,
-% 			case mnesia:read(locations, Hash) of
-% 				[] -> case mnesia:read(cursor, Filename) of
-% 					  [] ->
-% 					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = 0},
-% 					  mnesia:write(Location);
-% 					  [{_,_,Offset}] ->
-% 					  Location = #locations{hash = Hash, size = erlang:byte_size(Content), offset = Offset},
-% 					  mnesia:write(Location)
-% 				  end;
-% 				[_] -> already_registered
-% 			end,
-% 			case mnesia:read(cursor, Filename) of
-% 				[] -> mnesia:write(#cursor{filename = Filename, offset = erlang:byte_size(Content)});
-% 				[Cursor] -> mnesia:write(#cursor{filename = Filename, offset = Cursor#cursor.offset + erlang:byte_size(Content)})
-% 			end
-% 		end),
-%	 {Hash, Function};
 
 create_command({read, {filename, Name}}) ->
 	Function = (fun () ->
@@ -140,7 +104,7 @@ compose(Commands) ->
 	{Hashes, Function} = lists:foldr(fun ({Hash, Function}, {HashAcc, FunAcc}) -> {[Hash|HashAcc], (fun (_) -> FunAcc(Function()) end)} end, 
 					 {[], (fun (Data) -> Data end)},
 					 lists:map(fun (X) -> create_command(X) end, Commands)),
-	{Hashes, (fun () -> Function(abc) end)}.	
+	{Hashes, (fun () -> Function(abc) end)}.
 
 match_command(<<"W",
 		HashToReplace:1/binary,
@@ -155,9 +119,8 @@ match_command(<<"W",
 	ContentLength = binary:decode_unsigned(BinContentLength, big),
 	<<FileName:FileNameLength/binary, Content:ContentLength/binary, Remaining/binary>> = Rest,
 	NeutralHash = neutral_hash(),
-	Command = if NeutralHash == HashToReplace 
-		 -> {write, erlang:binary_to_list(FileName), Content};
-		 true -> {write, erlang:binary_to_list(FileName), Content, HashToReplace}
+	Command = if NeutralHash == HashToReplace -> {write, erlang:binary_to_list(FileName), Content};
+		     true -> {write, erlang:binary_to_list(FileName), Content, HashToReplace}
 		  end,
 	[Command|match_command(Remaining)];
 
@@ -185,9 +148,9 @@ loop(Connection) ->
 		{tcp, Connection, Data} ->
 		Operations = match_command(Data),
 		{Hashes, Transaction} = compose(Operations),
-		{atomic,Response} = mnesia:transaction(Transaction),
-		io:format("Response: ~p\n", [Response]),
-		case gen_tcp:send(Connection, Response) of
+		{atomic, _} = mnesia:transaction(Transaction),
+		%% io:format("Response: ~p\n", [Response]),
+		case gen_tcp:send(Connection, []) of
 				{error, timeout} ->
 					io:format("Send timeout, closing!~n",
 							  []);
@@ -200,7 +163,7 @@ loop(Connection) ->
 	end.
 
 main() ->
-	%% Files :: Filename => Hash list list
+	%% Files :: VirtualFileName => Hash list list
 	%% FilesProc = spawn(?MODULE, keeper, [nothing]),
 	%% Locations :: Hash => {size : int; offset: int}
 	%% LocationsProc = spawn(?MODULE, keeper, [nothing]),
